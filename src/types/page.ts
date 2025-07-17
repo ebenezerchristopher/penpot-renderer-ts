@@ -10,6 +10,7 @@ import { AnyShape } from './shape';
 export interface Page {
   id: UUID;
   name: string;
+  index?: number; // <-- NEW: Add optional index for ordering
   // The 'objects' is a flat map of all shapes on the page, indexed by their UUID.
   // The rendering engine will reconstruct the hierarchy from parent_id/frame_id.
   objects: Record<UUID, AnyShape>;

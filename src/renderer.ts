@@ -1,7 +1,7 @@
 // src/renderer.ts
-import { Page } from './types/page';
 import type {
   AnyShape,
+  BaseShape,
   FrameShape,
   GroupShape,
   PathShape,
@@ -16,17 +16,15 @@ import { UUID, UUID_ZERO, HexColor } from './types/common';
 import type { Matrix } from './types/geometry';
 import type {
   SolidFill,
-  //Stroke,
-  //ColorProperty,
   GradientFillType,
   ImageFillType,
   GradientFill,
   GradientStop,
-  //Shadow,
-  //Blur,
 } from './types/styles';
-import { LayoutEngine } from './layoutEngine'; // <-- NEW: Import LayoutEngine
-import type { ComputedLayout } from './types/layoutEngine'; // <-- NEW: Import ComputedLayout
+import { LayoutEngine } from './layoutEngine';
+import type { ComputedLayout } from './types/layoutEngine';
+import { ParagraphSetNode, ParagraphNode, TextNode } from './types/text'; // These are used at runtime, so not 'import type'
+import type { File } from './types/file';
 
 /**
  * The main class for rendering Penpot shapes onto a canvas.
@@ -34,7 +32,8 @@ import type { ComputedLayout } from './types/layoutEngine'; // <-- NEW: Import C
 export class Renderer {
   private ctx: CanvasRenderingContext2D;
   private currentShapesMap: Record<UUID, AnyShape> = {};
-  private layoutEngine: LayoutEngine; // <-- NEW: Instance of LayoutEngine
+  private layoutEngine: LayoutEngine;
+  private currentFile: File | null = null;
 
   /**
    * Creates a new Renderer instance.
@@ -47,23 +46,100 @@ export class Renderer {
     }
     this.ctx = context;
     console.log('Penpot Renderer Initialized.');
-    this.layoutEngine = new LayoutEngine(); // <-- NEW: Initialize LayoutEngine
+    this.layoutEngine = new LayoutEngine();
   }
 
   /**
-   * Renders a full Penpot page object.
+   * Renders a specific page from a Penpot File object.
    * This is the main entry point for rendering.
-   * @param page - The page object to render.
+   * @param file The full Penpot File object.
+   * @param pageId The ID of the page to render.
    */
-  public render(page: Page): void {
+  public render(file: File, pageId: UUID): void {
     this.ctx.clearRect(0, 0, this.ctx.canvas.width, this.ctx.canvas.height);
-    console.log(`Rendering page: "${page.name}" (ID: ${page.id})`);
+
+    this.currentFile = file;
+
+    const page = file.data?.pages_index?.[pageId];
+    if (!page) {
+      console.error(`Page with ID ${pageId} not found in file.`);
+      return;
+    }
+
+    console.log(
+      `Rendering page: "${page.name}" (ID: ${page.id}) from file "${file.name}"`
+    );
+
     this.currentShapesMap = page.objects;
+
     const rootShapes = Object.values(this.currentShapesMap).filter(
       (shape) => shape.parent_id === UUID_ZERO || shape.id === UUID_ZERO
     );
     rootShapes.forEach((shape) => this._renderShape(shape));
+
     console.log(`Finished rendering page: "${page.name}"`);
+    this.currentFile = null;
+  }
+
+  /**
+   * Resolves a shape from a component definition.
+   * This is used when rendering a component instance.
+   * @param componentId The ID of the component definition.
+   * @param shapeRef The ID of the shape within the component's main instance.
+   * @returns The referenced shape from the component, or null if not found.
+   */
+  private _resolveComponentShape(
+    componentId: UUID,
+    shapeRef: UUID
+  ): AnyShape | null {
+    if (!this.currentFile?.data?.components) {
+      console.warn(
+        `  _resolveComponentShape: No components data available in file.`
+      );
+      return null;
+    }
+
+    const component = this.currentFile.data.components[componentId];
+    if (!component) {
+      console.warn(
+        `  _resolveComponentShape: Component with ID ${componentId} not found.`
+      );
+      return null;
+    }
+
+    if (component.objects) {
+      return component.objects[shapeRef] ?? null;
+    } else if (component.main_instance_page && component.main_instance_id) {
+      const mainInstancePage =
+        this.currentFile.data.pages_index?.[component.main_instance_page];
+      if (mainInstancePage) {
+        const findShapeInHierarchy = (
+          rootShape: AnyShape,
+          targetId: UUID
+        ): AnyShape | null => {
+          if (rootShape.id === targetId) {
+            return rootShape;
+          }
+          if ('shapes' in rootShape && rootShape.shapes) {
+            for (const childId of rootShape.shapes) {
+              const childShape = mainInstancePage.objects[childId];
+              if (childShape) {
+                const found = findShapeInHierarchy(childShape, targetId);
+                if (found) return found;
+              }
+            }
+          }
+          return null;
+        };
+
+        const mainInstanceRoot =
+          mainInstancePage.objects[component.main_instance_id];
+        if (mainInstanceRoot) {
+          return findShapeInHierarchy(mainInstanceRoot, shapeRef);
+        }
+      }
+    }
+    return null;
   }
 
   /**
@@ -150,14 +226,12 @@ export class Renderer {
       return;
     }
 
-    // Get shadow properties for this shape, if any
     const dropShadow = shape.shadow?.find(
       (s) => s.style === 'drop-shadow' && !s.hidden
     );
     const hasShadow = !!dropShadow;
 
     shape.fills.forEach((fill) => {
-      // Temporarily apply shadow properties before filling
       if (hasShadow && dropShadow) {
         const shadowColor = dropShadow.color.color;
         const shadowOpacity = dropShadow.color.opacity ?? 1;
@@ -188,7 +262,6 @@ export class Renderer {
         );
       }
 
-      // Reset shadow properties immediately after filling
       if (hasShadow) {
         this.ctx.shadowColor = 'transparent';
         this.ctx.shadowOffsetX = 0;
@@ -207,14 +280,12 @@ export class Renderer {
       return;
     }
 
-    // Get shadow properties for this shape, if any
     const dropShadow = shape.shadow?.find(
       (s) => s.style === 'drop-shadow' && !s.hidden
     );
     const hasShadow = !!dropShadow;
 
     shape.strokes.forEach((stroke) => {
-      // Temporarily apply shadow properties before stroking
       if (hasShadow && dropShadow) {
         const shadowColor = dropShadow.color.color;
         const shadowOpacity = dropShadow.color.opacity ?? 1;
@@ -241,7 +312,6 @@ export class Renderer {
         this.ctx.stroke();
       }
 
-      // Reset shadow properties immediately after stroking
       if (hasShadow) {
         this.ctx.shadowColor = 'transparent';
         this.ctx.shadowOffsetX = 0;
@@ -253,16 +323,30 @@ export class Renderer {
 
   /**
    * Applies blur effects to the canvas context for the current shape.
-   * Note: `ctx.filter` applies to the *entire* drawing operation following it.
    * @param shape The shape object.
    */
   private _applyBlur(shape: AnyShape): void {
-    // Reset filter first
     this.ctx.filter = 'none';
 
-    // Apply Blur
     if (shape.blur && !shape.blur.hidden) {
       this.ctx.filter = `blur(${shape.blur.value}px)`;
+    }
+  }
+
+  /**
+   * Safely copies a property from a source object to a target object.
+   * This helper is used for applying component instance overrides.
+   * @param target The target object (e.g., the merged shape).
+   * @param source The source object (e.g., the instance shape).
+   * @param key The key of the property to copy.
+   */
+  private _copyProperty<T extends BaseShape, K extends keyof T>(
+    target: T,
+    source: T,
+    key: K
+  ): void {
+    if (Object.prototype.hasOwnProperty.call(source, key)) {
+      target[key] = source[key];
     }
   }
 
@@ -274,24 +358,54 @@ export class Renderer {
    *                          This is used by the LayoutEngine to apply computed positions/sizes.
    */
   private _renderShape(shape: AnyShape, overrideTransform?: Matrix): void {
-    // <-- MODIFIED: Added overrideTransform
     if (shape.hidden) {
       return;
     }
 
+    // Handle component instances and apply overrides
+    if (
+      this.currentFile &&
+      shape.component_id &&
+      shape.shape_ref &&
+      !shape.main_instance
+    ) {
+      const referencedShape = this._resolveComponentShape(
+        shape.component_id,
+        shape.shape_ref
+      );
+
+      if (referencedShape) {
+        let mergedShape: AnyShape = Object.assign({}, referencedShape);
+
+        if (shape.touched) {
+          for (const key of shape.touched) {
+            this._copyProperty(mergedShape, shape, key as keyof BaseShape);
+          }
+        }
+
+        console.log(
+          `  Rendering Component Instance: "${shape.name}" (ID: ${shape.id}) referencing "${referencedShape.name}" (ID: ${referencedShape.id}) with overrides.`
+        );
+        this._renderShape(mergedShape, overrideTransform ?? shape.transform);
+        return;
+      } else {
+        console.warn(
+          `  Component Instance: Referenced shape ${shape.shape_ref} not found for component ${shape.component_id} in instance "${shape.name}".`
+        );
+      }
+    }
+
     this.ctx.save();
-    // Use overrideTransform if provided, otherwise use the shape's own transform
-    this._applyTransform(overrideTransform ?? shape.transform); // <-- MODIFIED: Use overrideTransform
+    this._applyTransform(overrideTransform ?? shape.transform);
 
     const overallOpacity = shape.opacity ?? 1;
     this.ctx.globalAlpha = overallOpacity;
 
-    // Apply blur filter once per shape (before drawing its path)
     this._applyBlur(shape);
 
     console.log(
       `  Rendering ${shape.type} "${shape.name}" (ID: ${shape.id}) at matrix translation (${(overrideTransform ?? shape.transform).e}, ${(overrideTransform ?? shape.transform).f})`
-    ); // <-- MODIFIED: Log overrideTransform
+    );
 
     switch (shape.type) {
       case 'rect':
@@ -316,10 +430,10 @@ export class Renderer {
         this._drawBool(shape);
         break;
       case 'group':
-        this._drawGroup(shape); // Group handles its own children rendering
+        this._drawGroup(shape);
         break;
       case 'frame':
-        this._drawFrame(shape); // Frame handles its own children rendering
+        this._drawFrame(shape);
         break;
       default: {
         const getShapeInfo = (s: unknown) => {
@@ -406,7 +520,67 @@ export class Renderer {
     this._applyStrokes(shape);
   }
 
+  /**
+   * Applies font styles and fills/strokes for a text node.
+   * @param node The text or paragraph node.
+   */
+  private _applyTextNodeStyles(node: ParagraphNode | TextNode): void {
+    const fontStyle = node.font_style ?? 'normal';
+    const fontWeight = node.font_weight ?? 'normal';
+    const fontSize = node.font_size ?? '14px';
+    const fontFamily = node.font_family ?? 'sans-serif';
+
+    this.ctx.font = `${fontStyle} ${fontWeight} ${fontSize} ${fontFamily}`;
+
+    if (node.fills && node.fills.length > 0) {
+      const firstFill = node.fills[0];
+      if ('fill_color' in firstFill) {
+        const solidFill: SolidFill = firstFill;
+        const opacity = solidFill.fill_opacity ?? 1;
+        this.ctx.fillStyle = this._hexToRgba(solidFill.fill_color, opacity);
+      }
+    } else {
+      this.ctx.fillStyle = 'black';
+    }
+  }
+
   private _drawText(shape: TextShape): void {
+    let currentYOffset = 0;
+
+    if (shape.content && shape.content.children) {
+      shape.content.children.forEach((paragraphSetOrParagraph) => {
+        const paragraphs: ParagraphNode[] = [];
+        if (paragraphSetOrParagraph.type === 'paragraph-set') {
+          paragraphs.push(
+            ...(paragraphSetOrParagraph as ParagraphSetNode).children
+          );
+        } else if (paragraphSetOrParagraph.type === 'paragraph') {
+          paragraphs.push(paragraphSetOrParagraph as ParagraphNode);
+        }
+
+        paragraphs.forEach((paragraph) => {
+          if (paragraph.children) {
+            let currentXOffset = 0;
+
+            this._applyTextNodeStyles(paragraph);
+
+            paragraph.children.forEach((textNode) => {
+              this._applyTextNodeStyles(textNode);
+
+              this.ctx.fillText(
+                textNode.text,
+                currentXOffset,
+                currentYOffset + (parseFloat(this.ctx.font) || 14)
+              );
+
+              currentXOffset += this.ctx.measureText(textNode.text).width;
+            });
+          }
+          currentYOffset += (parseFloat(this.ctx.font) || 14) * 1.2;
+        });
+      });
+    }
+
     this.ctx.beginPath();
     this.ctx.rect(0, 0, shape.width, shape.height);
     this._applyFills(shape);
@@ -435,12 +609,10 @@ export class Renderer {
   }
 
   private _drawGroup(shape: GroupShape): void {
-    // Groups are containers; recursively render their children.
-    // They don't have their own layout properties, so children are rendered with their own transforms.
     shape.shapes.forEach((childId) => {
       const childShape = this.currentShapesMap[childId];
       if (childShape) {
-        this._renderShape(childShape); // No overrideTransform for group children
+        this._renderShape(childShape);
       } else {
         console.warn(
           `      Child shape with ID ${childId} not found for group "${shape.name}"`
@@ -455,7 +627,6 @@ export class Renderer {
     this._applyFills(shape);
     this._applyStrokes(shape);
 
-    // NEW: Layout calculation for frame children
     let computedLayout: ComputedLayout = {};
     if (shape.layout) {
       computedLayout = this.layoutEngine.calculateLayout(
@@ -467,9 +638,8 @@ export class Renderer {
     shape.shapes.forEach((childId) => {
       const childShape = this.currentShapesMap[childId];
       if (childShape) {
-        // If layout is active, pass the computed transform for this child
         const childComputedTransform = computedLayout[childId];
-        this._renderShape(childShape, childComputedTransform); // <-- MODIFIED: Pass computed transform
+        this._renderShape(childShape, childComputedTransform);
       } else {
         console.warn(
           `      Child shape with ID ${childId} not found for frame "${shape.name}"`
