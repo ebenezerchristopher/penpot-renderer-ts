@@ -15,9 +15,9 @@ export type PathCommand =
     }
   | {
       command: 'close-path';
-      params?: Record<string, never>;
+      params?: Record<string, never>; // Use a more precise type for empty objects
       relative?: boolean;
-    }; // <-- Corrected this line
+    };
 
 /**
  * Represents the full path data, an ordered list of commands.

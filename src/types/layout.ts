@@ -1,6 +1,6 @@
 // src/types/layout.ts
-import { UUID } from './common'; // UUID is used here
-import type { ColorProperty } from './styles'; // <-- NEW: Import ColorProperty for grid params
+import type { UUID } from './common';
+import type { ColorProperty } from './styles';
 
 // --- General Layout Types (shared by Flex and Grid) ---
 
@@ -13,6 +13,11 @@ export type LayoutType = 'flex' | 'grid';
  * Defines the type of gap between items.
  */
 export type GapType = 'simple' | 'multiple';
+
+/**
+ * Defines the type of padding for a container.
+ */
+export type PaddingType = 'simple' | 'multiple';
 
 /**
  * Represents padding values for a container.
@@ -117,7 +122,7 @@ export type JustifyItems = 'start' | 'end' | 'center' | 'stretch';
  * Used in `grid.cljc` for `schema:column-params`.
  */
 export interface GridColumnRowParams {
-  color?: ColorProperty; // <-- CORRECTED: Use imported ColorProperty
+  color?: ColorProperty;
   type?: 'stretch' | 'left' | 'center' | 'right';
   size?: number;
   margin?: number;
@@ -131,7 +136,7 @@ export interface GridColumnRowParams {
  */
 export interface GridSquareParams {
   size?: number;
-  color?: ColorProperty; // <-- CORRECTED: Use imported ColorProperty
+  color?: ColorProperty;
 }
 
 /**
@@ -172,7 +177,6 @@ export type Grid = ColumnGrid | RowGrid | SquareGrid;
  * Corresponds to a subset of `schema:layout-attrs` in `shape/layout.cljc`.
  */
 export interface GridContainerProperties {
-  // <-- CORRECTED: Added export
   layout_grid_dir?: GridDirection;
   layout_grid_rows?: GridTrack[];
   layout_grid_columns?: GridTrack[];
@@ -232,7 +236,7 @@ export interface LayoutContainerProperties
   layout?: LayoutType; // Overall layout mode (flex/grid)
   layout_gap_type?: GapType;
   layout_gap?: Gap;
-  layout_padding_type?: PaddingType; // <-- CORRECTED: Now exported
+  layout_padding_type?: PaddingType;
   layout_padding?: Padding;
   layout_grid_cells?: Record<UUID, GridCell>; // Map of UUID to GridCell for assigned items
 }
@@ -289,6 +293,3 @@ export interface LayoutItemProperties {
   layout_item_absolute?: boolean; // If true, item is absolutely positioned within the layout
   layout_item_z_index?: number; // For manual z-ordering within layout (CSS z-index)
 }
-
-// --- NEW: Export PaddingType here ---
-export type PaddingType = 'simple' | 'multiple'; // <-- CORRECTED: Added export for PaddingType

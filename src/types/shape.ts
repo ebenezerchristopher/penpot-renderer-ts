@@ -205,3 +205,9 @@ export type AnyShape =
   | PathShape
   | TextShape
   | BoolShape;
+
+/**
+ * A union of all possible shape type strings, derived from AnyShape.
+ * This is used for functions that operate on the shape's `type` property.
+ */
+export type ShapeType = AnyShape['type'];
